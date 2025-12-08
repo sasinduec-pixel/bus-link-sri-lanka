@@ -1,51 +1,101 @@
-// app.js - The Complete Logic for BusLink.lk
+// app.js - The Complete Logic for BusLink.lk (Dynamic Version)
 
-// Store current routes globally
+// --- CONFIGURATION ---
+// 🔴 TODO: PASTE YOUR SUPABASE KEYS HERE
+const SUPABASE_URL = 'https://cmdboiegbphfemgehjuj.supabase.co';
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNtZGJvaWVnYnBoZmVtZ2VoanVqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjUxMTQ5ODQsImV4cCI6MjA4MDY5MDk4NH0.lLn70wlEjRFK0I4iaLKNY6p3pgfVl7U30Eeytsv6N6k';
+
+// Initialize Supabase Client
+const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+// Global Variables
+let busNetwork = []; // This will be filled from the DB
 let currentRoutes = [];
+let allStopsSet = new Set(); 
 
 // --- 1. INITIALIZATION ---
 
-window.onload = function() {
-    populateDropdowns();
+window.onload = async function() {
+    await fetchRoutesFromDB();
 };
 
-function populateDropdowns() {
-    const allStops = new Set();
+async function fetchRoutesFromDB() {
+    console.log("🚀 Fetching routes from Supabase...");
+    
+    const { data, error } = await supabase
+        .from('routes')
+        .select('*');
+
+    if (error) {
+        console.error("Error fetching routes:", error);
+        alert("Failed to load routes. Please check your connection.");
+        return;
+    }
+
+    // Success! Update the global network
+    busNetwork = data;
+    console.log(`✅ Loaded ${busNetwork.length} routes from Cloud.`);
+    
+    // Enable UI
+    populateStopsList();
+    enableSearchUI();
+}
+
+function enableSearchUI() {
+    document.getElementById("start-location").placeholder = "Type to search (e.g. Panadura)";
+    document.getElementById("start-location").disabled = false;
+    
+    document.getElementById("end-location").placeholder = "Type to search (e.g. Kandy)";
+    document.getElementById("end-location").disabled = false;
+
+    const btn = document.getElementById("search-btn");
+    btn.disabled = false;
+    btn.innerHTML = "Find My Bus";
+    btn.classList.remove("bg-gray-400");
+    btn.classList.add("bg-blue-600", "hover:bg-blue-700");
+}
+
+function populateStopsList() {
+    allStopsSet.clear();
+    
     busNetwork.forEach(bus => {
-        bus.stops.forEach(stop => allStops.add(stop));
+        if(bus.stops && Array.isArray(bus.stops)) {
+            bus.stops.forEach(stop => allStopsSet.add(stop));
+        }
     });
 
-    const sortedStops = Array.from(allStops).sort();
-    
-    const startSelect = document.getElementById("start-location");
-    const endSelect = document.getElementById("end-location");
-
-    startSelect.innerHTML = "";
-    endSelect.innerHTML = "";
+    const sortedStops = Array.from(allStopsSet).sort();
+    const dataList = document.getElementById("stops-list");
+    dataList.innerHTML = "";
 
     sortedStops.forEach(stop => {
-        const option1 = new Option(stop, stop);
-        const option2 = new Option(stop, stop);
-        startSelect.add(option1);
-        endSelect.add(option2);
+        const option = document.createElement("option");
+        option.value = stop;
+        dataList.appendChild(option);
     });
-
-    // Defaults
-    startSelect.value = "Panadura Stand";
-    endSelect.value = "Piliyandala Clock Tower";
 }
 
 
 // --- 2. INTERACTION ---
 
 function handleSearch() {
-    const start = document.getElementById("start-location").value;
-    const end = document.getElementById("end-location").value;
+    const start = document.getElementById("start-location").value.trim();
+    const end = document.getElementById("end-location").value.trim();
+
+    if (!start || !end) {
+        alert("Please enter both a Start Point and a Destination.");
+        return;
+    }
+
+    if (!allStopsSet.has(start) || !allStopsSet.has(end)) {
+        alert("Stop not found in database. Please select from the list.");
+        return;
+    }
+
     const isLocalMode = document.getElementById("mode-toggle").checked; 
     const mode = isLocalMode ? "local" : "tourist";
 
     const listContainer = document.getElementById("results-list");
-    
     listContainer.innerHTML = '<div class="text-center p-4 text-gray-500"><i class="fas fa-spinner fa-spin mr-2"></i> Finding best route...</div>';
 
     setTimeout(() => {
@@ -54,7 +104,6 @@ function handleSearch() {
     }, 400); 
 }
 
-// Toggle UI update
 document.getElementById("mode-toggle").addEventListener('change', function() {
     const label = document.getElementById("mode-text");
     if(this.checked) {
@@ -69,16 +118,18 @@ document.getElementById("mode-toggle").addEventListener('change', function() {
 });
 
 
-// --- 3. THE LOGIC ---
+// --- 3. THE LOGIC (Same as before, but using DB data) ---
 
 function findRoute(startLocation, endLocation, mode) {
     if (startLocation === endLocation) return { error: "You are already there! 😊" };
 
+    // Direct Bus Check
     const directBuses = busNetwork.filter(bus => 
         bus.stops.includes(startLocation) && bus.stops.includes(endLocation)
     );
     if (directBuses.length > 0) return formatDirectResult(directBuses, mode);
 
+    // Transfer Check
     const startBuses = busNetwork.filter(bus => bus.stops.includes(startLocation));
     const endBuses = busNetwork.filter(bus => bus.stops.includes(endLocation));
     let validRoutes = [];
@@ -86,8 +137,9 @@ function findRoute(startLocation, endLocation, mode) {
     startBuses.forEach(busA => {
         endBuses.forEach(busB => {
             const intersection = busA.stops.filter(stop => busB.stops.includes(stop));
+            
             if (intersection.length > 0) {
-                const transferPoint = intersection[0];
+                const transferPoint = intersection[0]; 
                 const startIdx = busA.stops.indexOf(startLocation);
                 const transIdxA = busA.stops.indexOf(transferPoint);
                 const transIdxB = busB.stops.indexOf(transferPoint);
@@ -113,20 +165,19 @@ function findRoute(startLocation, endLocation, mode) {
 
 function calculateScore(busA, busB, transferPoint, mode) {
     let score = 50; 
+    // Handle null tags gracefully
+    const tagsA = busA.tags || [];
+    const tagsB = busB.tags || [];
+
     if (mode === "local") {
-        if (busA.tags.includes("fast")) score += 20;
-        if (busB.tags.includes("fast")) score += 20;
-        if (busA.frequency.includes("5 mins")) score += 10;
+        if (tagsA.includes("fast")) score += 20;
+        if (tagsB.includes("fast")) score += 20;
         if (transferPoint === "Katubedda Junction") score += 15;
     }
     if (mode === "tourist") {
-        if (busA.tags.includes("comfort")) score += 30;
-        if (busA.tags.includes("tourist_friendly")) score += 10;
+        if (tagsA.includes("comfort")) score += 30;
         const hub = transferHubs[transferPoint];
-        if (hub) {
-            if (hub.type === "easy") score += 20;
-            if (hub.type === "hard") score -= 40; 
-        }
+        if (hub && hub.type === "easy") score += 20;
     }
     return score;
 }
@@ -134,14 +185,14 @@ function calculateScore(busA, busB, transferPoint, mode) {
 function formatDirectResult(buses, mode) {
     let bestBus = buses[0];
     if (mode === "tourist") {
-        const comfy = buses.find(b => b.tags.includes("comfort"));
+        const comfy = buses.find(b => (b.tags || []).includes("comfort"));
         if (comfy) bestBus = comfy;
     }
     return [{ type: "direct", bus: bestBus }];
 }
 
 
-// --- 4. RENDER LIST VIEW (The Tiles) ---
+// --- 4. RENDER LIST VIEW ---
 
 function renderResultsList(routes, mode) {
     const listContainer = document.getElementById("results-list");
@@ -154,7 +205,6 @@ function renderResultsList(routes, mode) {
     }
 
     currentRoutes = routes;
-
     let html = "";
     const topRoutes = routes.slice(0, 3);
 
@@ -162,14 +212,14 @@ function renderResultsList(routes, mode) {
         const isBest = index === 0;
         const badge = isBest ? '<span class="bg-green-100 text-green-800 text-xs font-bold px-2 py-1 rounded absolute top-4 right-4">BEST OPTION</span>' : '';
         const borderClass = isBest ? 'border-green-500' : 'border-gray-300';
-
+        
         let title, subtitle, icon;
         if (route.type === "direct") {
-            title = `Bus ${route.bus.routeNo}`;
+            title = `Bus ${route.bus.route_no || route.bus.routeNo}`; // Handle DB snake_case vs JS camelCase
             subtitle = "Direct • No Transfer";
             icon = "fa-check-circle text-green-500";
         } else {
-            title = `Bus ${route.leg1.routeNo} ➔ ${route.leg2.routeNo}`;
+            title = `Bus ${route.leg1.route_no || route.leg1.routeNo} ➔ ${route.leg2.route_no || route.leg2.routeNo}`;
             subtitle = `Switch at ${route.transferAt}`;
             icon = "fa-exchange-alt text-blue-500";
         }
@@ -184,18 +234,16 @@ function renderResultsList(routes, mode) {
                     <div>
                         <h3 class="font-bold text-gray-800 text-lg">${title}</h3>
                         <p class="text-sm text-gray-500">${subtitle}</p>
-                        <p class="text-xs text-gray-400 mt-1">Tap for details <i class="fas fa-chevron-right ml-1"></i></p>
                     </div>
                 </div>
             </div>
         `;
     });
-
     listContainer.innerHTML = html;
 }
 
 
-// --- 5. RENDER DETAIL VIEW (The Logic Update!) ---
+// --- 5. RENDER DETAIL VIEW ---
 
 function openDetailView(index) {
     const route = currentRoutes[index];
@@ -204,33 +252,24 @@ function openDetailView(index) {
     const isLocalMode = document.getElementById("mode-toggle").checked;
     const mode = isLocalMode ? "local" : "tourist";
 
-    // Show Detail View
     detailView.classList.remove("hidden");
-    
-    // Draw Map with delay
-    setTimeout(() => {
-        drawMap(route);
-    }, 100);
+    setTimeout(() => { drawMap(route); }, 100);
 
     let html = "";
-    
+    // Normalize properties (DB might return route_no, local JS used routeNo)
+    const getRouteNo = (b) => b.route_no || b.routeNo;
+
     if (route.type === "direct") {
-        // DIRECT BUS
         html += `
             <div class="bg-blue-50 p-4 rounded-xl border border-blue-200">
-                <h3 class="font-bold text-blue-800"><i class="fas fa-bus"></i> Take Bus ${route.bus.routeNo}</h3>
+                <h3 class="font-bold text-blue-800"><i class="fas fa-bus"></i> Take Bus ${getRouteNo(route.bus)}</h3>
                 <p class="text-sm text-blue-600">${route.bus.name}</p>
                 <p class="text-xs text-gray-500 mt-2">${route.bus.description}</p>
-            </div>
-        `;
+            </div>`;
     } else {
-        // TRANSFER ROUTE
         const transferInfo = transferHubs[route.transferAt] || { details: "Switch buses here.", type: "medium" };
-        
-        // --- DIFFERENTIATE CONTENT BASED ON MODE ---
-
-        // 1. TOURIST EXTRAS
         let touristExtras = "";
+        
         if (mode === "tourist") {
             touristExtras = `
                 <div class="bg-yellow-50 p-3 rounded-lg border border-yellow-200 mt-2 text-sm text-gray-700">
@@ -244,94 +283,107 @@ function openDetailView(index) {
                         <p class="font-bold text-blue-900 text-sm">Show Conductor Card</p>
                         <p class="text-xs text-blue-500">Tap to show Sinhala text</p>
                     </div>
-                </div>
-            `;
-        } else {
-            // Local Mode: Just show simple text if needed, or nothing
-            touristExtras = `<p class="text-xs text-gray-400 mt-1 italic">Quick transfer.</p>`;
+                </div>`;
         }
 
-        // STEP 1
         html += `
             <div class="relative pl-8 border-l-2 border-gray-300 pb-6">
                 <div class="absolute -left-2.5 top-0 w-5 h-5 bg-blue-500 rounded-full border-4 border-white"></div>
-                <h4 class="font-bold text-gray-800">Step 1: Bus ${route.leg1.routeNo}</h4>
-                <p class="text-sm text-gray-600">Take ${route.leg1.name}</p>
+                <h4 class="font-bold text-gray-800">Bus ${getRouteNo(route.leg1)}</h4>
+                <p class="text-sm text-gray-600">${route.leg1.name}</p>
             </div>
-        `;
-
-        // TRANSFER STEP
-        html += `
             <div class="relative pl-8 border-l-2 border-gray-300 pb-6">
                 <div class="absolute -left-2.5 top-0 w-5 h-5 bg-yellow-400 rounded-full border-4 border-white"></div>
-                <h4 class="font-bold text-gray-800">Get off at ${route.transferAt}</h4>
-                ${touristExtras} 
+                <h4 class="font-bold text-gray-800">Switch at ${route.transferAt}</h4>
+                ${touristExtras}
             </div>
-        `;
-
-        // STEP 2
-        html += `
             <div class="relative pl-8 border-l-2 border-transparent">
                 <div class="absolute -left-2.5 top-0 w-5 h-5 bg-green-500 rounded-full border-4 border-white"></div>
-                <h4 class="font-bold text-gray-800">Step 2: Bus ${route.leg2.routeNo}</h4>
-                <p class="text-sm text-gray-600">Take ${route.leg2.name}</p>
+                <h4 class="font-bold text-gray-800">Bus ${getRouteNo(route.leg2)}</h4>
+                <p class="text-sm text-gray-600">${route.leg2.name}</p>
                 <p class="text-xs text-gray-500 mt-1">To Destination</p>
-            </div>
-        `;
+            </div>`;
     }
-
     stepContainer.innerHTML = html;
 }
 
-function goBack() {
-    document.getElementById("detail-view").classList.add("hidden");
-}
+function goBack() { document.getElementById("detail-view").classList.add("hidden"); }
+function closeModal() { document.getElementById("conductor-modal").classList.add("hidden"); }
+
+// --- 6. MAP & EXTRAS ---
+// (We keep this hardcoded for now because coordinates are static)
+
+const transferHubs = {
+    "Pettah": { details: "Main Hub. Check Private (Bastian Mawatha) or CTB stands.", type: "hard" },
+    "Nugegoda": { details: "Hub for High Level & 120 route.", type: "easy" },
+    "Borella": { details: "Major crossroad for 177, 154, 190.", type: "hard" },
+    "Kurunegala": { details: "Main hub for all Northern/Eastern buses.", type: "easy" },
+    "Makumbura (Kottawa)": { details: "Multimodal Center (MMC) for Highway Buses.", type: "easy" },
+    "Moratuwa Stand": { details: "Walk inside the stand.", type: "easy" },
+    "Katubedda Junction": { details: "Cross Galle road to K-Zone side.", type: "hard" },
+};
+
+// --- MERGE COORDINATES (Same as before) ---
+// We need manualStops defined here because buses.js is gone
+const manualStops = {
+    "Pettah": [6.9338, 79.8540],
+    "Galle Face": [6.9271, 79.8453],
+    "Kollupitiya": [6.9147, 79.8512],
+    "Liberty Plaza": [6.9125, 79.8525],
+    "Bambalapitiya": [6.8906, 79.8554],
+    "Wellawatte": [6.8732, 79.8606],
+    "Dehiwala": [6.8511, 79.8659],
+    "Mt Lavinia": [6.8306, 79.8653],
+    "Ratmalana": [6.8159, 79.8722],
+    "Katubedda Junction": [6.7915, 79.8872],
+    "Moratuwa Stand": [6.7744, 79.8827],
+    "Moratuwa Cross": [6.7761, 79.8860],
+    "Panadura Stand": [6.7146, 79.9096],
+    "Town Hall": [6.9211, 79.8654],
+    "Eye Hospital": [6.9242, 79.8698],
+    "Borella": [6.9331, 79.8824],
+    "Ayurveda Junction": [6.9143, 79.8942],
+    "Rajagiriya": [6.9093, 79.8986],
+    "Welikada": [6.9056, 79.9042],
+    "Battaramulla": [6.8887, 79.9174],
+    "Koswatta": [6.9045, 79.9281],
+    "Malabe": [6.9061, 79.9647],
+    "Kaduwela": [6.9329, 79.9839],
+    "Nugegoda": [6.8649, 79.8997],
+    "Maharagama": [6.8480, 79.9265],
+    "Kottawa": [6.8412, 79.9654],
+    "Makumbura (Kottawa)": [6.8293, 79.9984],
+    "Homagama": [6.8446, 80.0007],
+    "Avissawella": [6.9543, 80.2046],
+    "Piliyandala Clock Tower": [6.8016, 79.9227],
+    "Kesbewa": [6.7845, 79.9405],
+    "Horana": [6.7161, 80.0631],
+    "Kandy Clock Tower": [7.2906, 80.6337],
+    "Peradeniya": [7.2693, 80.5960],
+    "Galle Fort": [6.0268, 80.2170],
+    "Matara Stand": [5.9463, 80.5471],
+    "Jaffna Stand": [9.6615, 80.0255],
+    "Kurunegala": [7.4863, 80.3623],
+    "Anuradhapura New Town": [8.3114, 80.4037]
+};
+
+const stopCoordinates = {
+    ...(typeof autoGeneratedStops !== 'undefined' ? autoGeneratedStops : {}),
+    ...manualStops
+};
 
 
-// --- 6. MODAL & MAP ---
-
-function openConductorModal(locationName) {
-    const modal = document.getElementById("conductor-modal");
-    const sinhalaText = document.getElementById("modal-sinhala-text");
-    const englishText = document.getElementById("modal-english-text");
-
-    const sinhalaNames = {
-        "Moratuwa Stand": "මොරටුව ස්ටෑන්ඩ් එකෙන්",
-        "Moratuwa Cross": "මොරටුව කුරුස හන්දියෙන්",
-        "Katubedda Junction": "කටුබැද්ද හන්දියෙන්",
-        "Piliyandala Clock Tower": "පිළියන්දල ඔරලෝසු කණුවෙන්",
-        "Panadura Stand": "පානදුර ස්ටෑන්ඩ් එකෙන්",
-        "Kottawa": "කොට්ටාවෙන්",
-        "Mt Lavinia": "ගල්කිස්සෙන්",
-        "Ratmalana": "රත්මලානෙන්",
-        "Walana": "වලානෙන්",
-        "Old Bridge": "පරණ පාලමෙන්",
-        "University": "කැම්පස් එකෙන්"
-    };
-
-    const translation = sinhalaNames[locationName] || locationName;
-    sinhalaText.innerText = `මට ${translation} බහින්න ඕන.`;
-    englishText.innerText = locationName;
-    modal.classList.remove("hidden");
-}
-
-function closeModal() {
-    document.getElementById("conductor-modal").classList.add("hidden");
-}
+// --- MAP LOGIC ---
 
 let mapInstance = null; 
 let userMarker = null;
 
 function drawMap(route) {
     if (typeof L === 'undefined') return;
-
     if (!mapInstance) {
-        mapInstance = L.map('map').setView([6.7744, 79.8827], 13); 
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            attribution: '© OpenStreetMap'
-        }).addTo(mapInstance);
+        mapInstance = L.map('map').setView([6.9, 79.9], 10); 
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(mapInstance);
     }
-    
     setTimeout(() => { mapInstance.invalidateSize(); }, 200);
 
     mapInstance.eachLayer((layer) => {
@@ -342,13 +394,14 @@ function drawMap(route) {
 
     let latlngs = [];
     const addPath = (bus, color) => {
-        const pathCoords = bus.stops
+        // Handle database array vs local array structure
+        const stops = bus.stops || [];
+        const pathCoords = stops
             .map(stop => stopCoordinates[stop]) 
             .filter(coord => coord !== undefined); 
         if (pathCoords.length > 0) {
             L.polyline(pathCoords, {color: color, weight: 5}).addTo(mapInstance);
-            L.marker(pathCoords[0]).addTo(mapInstance).bindPopup(`<b>Start</b><br>${bus.routeNo}`);
-            L.marker(pathCoords[pathCoords.length - 1]).addTo(mapInstance).bindPopup(`<b>End</b><br>${bus.routeNo}`);
+            L.marker(pathCoords[0]).addTo(mapInstance).bindPopup(`<b>${bus.route_no || bus.routeNo} Start</b>`);
             latlngs = latlngs.concat(pathCoords);
         }
     };
@@ -358,9 +411,8 @@ function drawMap(route) {
     } else {
         addPath(route.leg1, 'blue');
         addPath(route.leg2, 'red');
-        const transferCoord = stopCoordinates[route.transferAt];
-        if (transferCoord) {
-            L.marker(transferCoord).addTo(mapInstance).bindPopup(`<b>Switch Here!</b><br>${route.transferAt}`);
+        if (stopCoordinates[route.transferAt]) {
+            L.marker(stopCoordinates[route.transferAt]).addTo(mapInstance).bindPopup(`<b>Switch: ${route.transferAt}</b>`);
         }
     }
 
@@ -370,32 +422,21 @@ function drawMap(route) {
 }
 
 function enableGPS() {
-    if (!navigator.geolocation) { alert("GPS not supported"); return; }
-    const button = document.querySelector("#map-container button i");
-    button.classList.remove("fa-crosshairs");
-    button.classList.add("fa-spinner", "fa-spin");
-
-    navigator.geolocation.getCurrentPosition((position) => {
-        const lat = position.coords.latitude;
-        const lng = position.coords.longitude;
-        button.classList.remove("fa-spinner", "fa-spin");
-        button.classList.add("fa-crosshairs");
-
-        if (userMarker) {
-            userMarker.setLatLng([lat, lng]);
+    if (!navigator.geolocation) return;
+    navigator.geolocation.getCurrentPosition((pos) => {
+        const { latitude: lat, longitude: lng } = pos.coords;
+        if (!userMarker) {
+            userMarker = L.marker([lat, lng]).addTo(mapInstance);
         } else {
-            const blueDotIcon = L.divIcon({
-                className: 'css-icon',
-                html: '<div class="gps-pulse"></div><div style="background:#3B82F6; width:12px; height:12px; border-radius:50%; border:2px solid white; box-shadow:0 0 5px rgba(0,0,0,0.3);"></div>',
-                iconSize: [20, 20],
-                iconAnchor: [10, 10]
-            });
-            userMarker = L.marker([lat, lng], {icon: blueDotIcon}).addTo(mapInstance);
+            userMarker.setLatLng([lat, lng]);
         }
-        mapInstance.setView([lat, lng], 15);
-    }, () => {
-        button.classList.remove("fa-spinner", "fa-spin");
-        button.classList.add("fa-crosshairs");
-        alert("GPS Error");
+        mapInstance.setView([lat, lng], 13);
     });
+}
+
+function openConductorModal(locationName) {
+    const modal = document.getElementById("conductor-modal");
+    document.getElementById("modal-english-text").innerText = locationName;
+    document.getElementById("modal-sinhala-text").innerText = `මට ${locationName} බහින්න ඕන.`; 
+    modal.classList.remove("hidden");
 }

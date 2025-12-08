@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>BusLink Data Migration</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body class="bg-gray-900 text-white flex flex-col items-center justify-center min-h-screen p-4">
+
+    <div class="w-full max-w-lg bg-gray-800 p-8 rounded-xl shadow-2xl border border-gray-700">
+        <h1 class="text-2xl font-bold mb-2 text-green-400">🚀 Migration Station</h1>
+        <p class="text-gray-400 mb-6 text-sm">Upload local `buses.js` to Supabase DB</p>
+
+        <div class="space-y-4 mb-6">
+            <div>
+                <label class="block text-xs font-bold text-gray-500 uppercase">Project URL</label>
+                <input type="text" id="supaUrl" placeholder="https://xyz.supabase.co" class="w-full bg-gray-900 border border-gray-600 rounded p-2 text-white focus:border-green-500 outline-none">
+            </div>
+            <div>
+                <label class="block text-xs font-bold text-gray-500 uppercase">Public API Key (Anon)</label>
+                <input type="text" id="supaKey" placeholder="eyJh..." class="w-full bg-gray-900 border border-gray-600 rounded p-2 text-white focus:border-green-500 outline-none">
+            </div>
+        </div>
+
+        <div id="logs" class="bg-black font-mono text-xs h-40 overflow-y-auto p-4 rounded mb-6 text-gray-300 border border-gray-700">
+            Waiting for credentials...
+        </div>
+
+        <button onclick="startMigration()" class="w-full bg-green-600 hover:bg-green-500 text-white font-bold py-3 rounded-lg transition transform active:scale-95">
+            START UPLOAD
+        </button>
+    </div>
+
+    <script src="buses.js"></script>
+
+    <script>
+        async function startMigration() {
+            const url = document.getElementById('supaUrl').value.trim();
+            const key = document.getElementById('supaKey').value.trim();
+            const logBox = document.getElementById('logs');
+
+            // 1. Validation
+            if (!url || !key) {
+                alert("Please enter Supabase URL and Key!");
+                return;
+            }
+            
+            // Check if the library loaded this time
+            if (typeof supabase === 'undefined') {
+                logBox.innerHTML += "\n❌ CRITICAL ERROR: Supabase library failed to load again.\nTry disabling AdBlock or checking your internet connection.";
+                return;
+            }
+
+            if (typeof busNetwork === 'undefined') {
+                logBox.innerHTML += "\n❌ Error: busNetwork is not defined. Check if buses.js is linked correctly.";
+                return;
+            }
+
+            // 2. Initialize Client (Note: syntax might differ slightly on CDN, this is the standard UMD way)
+            // Usually on CDN it exposes a global 'supabase' object which has 'createClient'
+            const client = supabase.createClient(url, key);
+            
+            logBox.innerHTML = "✅ Connected to Supabase...\n";
+            logBox.innerHTML += `📦 Found ${busNetwork.length} routes in local file.\n`;
+
+            // 3. Loop and Upload
+            let successCount = 0;
+            let failCount = 0;
+
+            for (const route of busNetwork) {
+                logBox.innerHTML += `➡️ Uploading Route ${route.routeNo}... `;
+                
+                const { error } = await client
+                    .from('routes')
+                    .insert({
+                        route_no: route.routeNo,
+                        name: route.name,
+                        type: route.type,
+                        frequency: route.frequency,
+                        description: route.description,
+                        tags: route.tags,
+                        stops: route.stops
+                    });
+
+                if (error) {
+                    logBox.innerHTML += `❌ FAILED: ${error.message}\n`;
+                    failCount++;
+                } else {
+                    logBox.innerHTML += `✅ OK\n`;
+                    successCount++;
+                }
+                
+                logBox.scrollTop = logBox.scrollHeight;
+            }
+
+            logBox.innerHTML += `\n✨ DONE! Success: ${successCount} | Failed: ${failCount}`;
+            
+            if(successCount > 0) {
+                alert("Migration Complete! You can now check your Supabase Dashboard.");
+            }
+        }
+    </script>
+</body>
+</html>

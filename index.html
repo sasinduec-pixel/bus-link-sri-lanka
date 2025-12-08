@@ -4,46 +4,28 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>BusLink Sri Lanka</title>
+    
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#2563eb">
+    <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/3448/3448339.png">
+
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
     <style>
-        .toggle-checkbox:checked {
-            right: 0;
-            border-color: #EF4444;
-        }
-        .toggle-checkbox:checked + .toggle-label {
-            background-color: #EF4444;
-        }
-        #map { height: 100%; width: 100%; border-radius: 0.75rem; }
+        .toggle-checkbox:checked { right: 0; border-color: #EF4444; }
+        .toggle-checkbox:checked + .toggle-label { background-color: #EF4444; }
         
-        .gps-pulse {
-            background: rgba(59, 130, 246, 0.5);
-            border-radius: 50%;
-            height: 14px;
-            width: 14px;
-            position: absolute;
-            left: 50%;
-            top: 50%;
-            margin: -7px 0 0 -7px;
-            animation: pulsate 1s ease-out;
-            animation-iteration-count: infinite; 
-            opacity: 0;
-            z-index: 1;
-        }
-        @keyframes pulsate {
-            0% { transform: scale(0.1, 0.1); opacity: 0.0; }
-            50% { opacity: 1.0; }
-            100% { transform: scale(3, 3); opacity: 0.0; }
-        }
+        /* Timeline CSS for Route Details */
+        .timeline-line { position: absolute; left: 15px; top: 25px; bottom: -15px; width: 2px; background: #e5e7eb; }
+        .last-item .timeline-line { display: none; }
     </style>
 </head>
 <body class="bg-gray-100 h-screen flex flex-col items-center">
 
-    <div class="w-full max-w-md bg-white shadow-md p-4 sticky top-0 z-40">
+    <div class="w-full max-w-md bg-white shadow-md p-4 sticky top-0 z-40 border-b border-gray-200">
         <div class="flex justify-between items-center">
             <h1 class="text-xl font-bold text-blue-600"><i class="fas fa-bus-alt"></i> BusLink.lk</h1>
             <div class="flex items-center">
@@ -59,13 +41,13 @@
     <div class="w-full max-w-md p-4 flex-grow overflow-y-auto pb-20">
 
         <div id="search-section" class="bg-white rounded-xl shadow p-4 mb-4">
+            
             <div class="mb-3">
-                <label class="block text-xs text-gray-400 font-bold mb-1">START</label>
+                <label class="block text-xs text-gray-400 font-bold mb-1">START POINT</label>
                 <div class="flex items-center border rounded bg-gray-50 p-2">
                     <i class="fas fa-map-marker-alt text-green-500 mr-2"></i>
-                    <select id="start-location" class="w-full bg-transparent outline-none">
-                        <option>Loading...</option>
-                    </select>
+                    <input list="stops-list" id="start-location" type="text" placeholder="Loading..." disabled
+                           class="w-full bg-transparent outline-none text-gray-700 font-medium placeholder-gray-400">
                 </div>
             </div>
 
@@ -73,73 +55,56 @@
                 <label class="block text-xs text-gray-400 font-bold mb-1">DESTINATION</label>
                 <div class="flex items-center border rounded bg-gray-50 p-2">
                     <i class="fas fa-flag-checkered text-red-500 mr-2"></i>
-                    <select id="end-location" class="w-full bg-transparent outline-none">
-                         <option>Loading...</option>
-                    </select>
+                    <input list="stops-list" id="end-location" type="text" placeholder="Loading..." disabled
+                           class="w-full bg-transparent outline-none text-gray-700 font-medium placeholder-gray-400">
                 </div>
             </div>
 
-            <button onclick="handleSearch()" class="w-full bg-blue-600 text-white font-bold py-3 rounded-lg shadow-lg active:scale-95 transition-transform">
-                Find My Bus
+            <button id="search-btn" onclick="handleSearch()" disabled class="w-full bg-gray-400 text-white font-bold py-3 rounded-lg shadow-lg">
+                <i class="fas fa-circle-notch fa-spin mr-2"></i> Connecting...
             </button>
         </div>
 
         <div id="results-list" class="space-y-4">
              <div id="placeholder-text" class="text-center text-gray-400 mt-10">
                 <i class="fas fa-route text-4xl mb-2"></i>
-                <p>Select your route to start</p>
+                <p>Type your Start & End points</p>
              </div>
-             </div>
+        </div>
 
-
-        <div id="detail-view" class="hidden fixed inset-0 bg-gray-100 z-50 flex flex-col w-full max-w-md mx-auto">
+        <div id="detail-view" class="hidden fixed inset-0 bg-gray-50 z-50 flex flex-col w-full max-w-md mx-auto">
             
-            <div class="bg-white p-4 shadow-md flex items-center">
+            <div class="bg-white p-4 shadow-md flex items-center sticky top-0 z-10">
                 <button onclick="goBack()" class="text-gray-600 hover:text-blue-600 mr-4">
                     <i class="fas fa-arrow-left text-xl"></i>
                 </button>
-                <h2 class="font-bold text-lg text-gray-800">Route Details</h2>
+                <h2 class="font-bold text-lg text-gray-800">Trip Details</h2>
             </div>
 
-            <div class="flex-grow overflow-y-auto p-4 pb-20">
-                
-                <div id="map-container" class="w-full h-64 bg-gray-200 rounded-xl shadow-inner mb-6 relative z-0 border border-gray-300 overflow-hidden">
-                    <div id="map"></div>
-                    <button onclick="enableGPS()" class="absolute bottom-3 right-3 bg-white text-gray-700 p-3 rounded-full shadow-lg z-[400] hover:bg-blue-50 focus:outline-none active:scale-90 transition">
-                        <i class="fas fa-crosshairs text-xl text-blue-600"></i>
-                    </button>
+            <div class="flex-grow overflow-y-auto p-4 pb-20" id="detail-steps">
                 </div>
-
-                <div id="detail-steps" class="space-y-4">
-                    </div>
-
-            </div>
         </div>
 
+        <datalist id="stops-list"></datalist>
     </div>
 
-    <div id="conductor-modal" class="fixed inset-0 bg-black bg-opacity-90 z-[60] hidden flex flex-col justify-center items-center p-6 transition-opacity duration-300">
+    <div id="conductor-modal" class="fixed inset-0 bg-black bg-opacity-90 z-[60] hidden flex flex-col justify-center items-center p-6">
         <div class="bg-white w-full max-w-sm rounded-2xl p-6 text-center shadow-2xl relative">
-            <button onclick="closeModal()" class="absolute top-4 right-4 text-gray-400 hover:text-gray-800 text-2xl">
-                <i class="fas fa-times"></i>
-            </button>
-            <div class="mb-4">
-                <i class="fas fa-user-tie text-4xl text-blue-600 mb-2"></i>
-                <p class="text-xs text-gray-500 uppercase tracking-widest font-bold">Show to Conductor</p>
-            </div>
+            <button onclick="closeModal()" class="absolute top-4 right-4 text-gray-400 hover:text-gray-800 text-2xl"><i class="fas fa-times"></i></button>
+            <div class="mb-4"><i class="fas fa-user-tie text-4xl text-blue-600 mb-2"></i><p class="text-xs text-gray-500 uppercase font-bold">Show to Conductor</p></div>
             <div class="border-t border-b border-gray-200 py-6 my-4">
                 <p class="text-gray-400 text-sm mb-2">Mata methanin bahinna oni:</p>
                 <h2 id="modal-sinhala-text" class="text-2xl font-bold text-gray-800 leading-tight"></h2>
                 <p id="modal-english-text" class="text-lg text-blue-600 font-bold mt-2"></p>
             </div>
-            <button onclick="closeModal()" class="mt-6 w-full bg-blue-600 text-white font-bold py-3 rounded-xl shadow-lg active:scale-95">
-                Got it, Thanks!
-            </button>
+            <button onclick="closeModal()" class="mt-6 w-full bg-blue-600 text-white font-bold py-3 rounded-xl shadow-lg">Got it, Thanks!</button>
         </div>
     </div>
 
-    <script src="buses.js"></script>
+    <script>
+        if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js');
+    </script>
+
     <script src="app.js"></script>
 </body>
-
-</html> 
+</html>
